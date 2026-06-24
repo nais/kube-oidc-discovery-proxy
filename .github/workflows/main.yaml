@@ -1,0 +1,73 @@
+name: Build and deploy
+on:
+  push:
+    paths-ignore:
+      - "*.md"
+permissions:
+  contents: read
+env:
+  NAME: kube-oidc-discovery-proxy
+  FEATURE_REPOSITORY: oci://europe-north1-docker.pkg.dev/nais-io/nais/feature
+jobs:
+  test:
+    name: ${{ matrix.task }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        task: [check, test]
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # ratchet:actions/setup-go@v6
+        with:
+          go-version-file: "go.mod"
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # ratchet:jdx/mise-action@v4
+      - run: mise run ${{ matrix.task }}
+  build_and_push:
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      version: ${{ steps.build-push-sign.outputs.version }}
+    needs:
+      - test
+    permissions:
+      packages: "write"
+      id-token: "write"
+    name: build and push
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # ratchet:actions/checkout@v7
+      - uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # ratchet:jdx/mise-action@v4
+      - uses: nais/platform-build-push-sign@31014e4bcac554cb52525fe2364244c5166b84d2 # ratchet:nais/platform-build-push-sign@main
+        id: build-push-sign
+        with:
+          name: ${{ env.NAME }}
+          google_service_account: gh-${{ env.NAME }}
+          workload_identity_provider: ${{ secrets.NAIS_IO_WORKLOAD_IDENTITY_PROVIDER }}
+          push_ghcr: true
+          push: true
+      - name: Update values.yaml
+        run: |
+          yq -i ".image.tag = \"${{ steps.build-push-sign.outputs.version }}\"" charts/values.yaml
+      - name: Build Chart
+        run: |-
+          yq -i ".version = \"${{ steps.build-push-sign.outputs.version }}\"" charts/Chart.yaml
+          helm package charts
+      - name: Push Chart
+        run: |-
+          helm push ${{ env.NAME }}*.tgz ${{ env.FEATURE_REPOSITORY }}
+  # deploy:
+  #   needs:
+  #     - build_and_push
+  #   runs-on: fasit-deploy
+  #   permissions:
+  #     id-token: write
+  #   steps:
+  #     - uses: nais/fasit-deploy@9f870e05e92cde6cfd827b13384ec09e80be65fd # ratchet:nais/fasit-deploy@v4.1.0
+  #       with:
+  #         chart: ${{ env.FEATURE_REPOSITORY }}/${{ env.NAME }}
+  #         version: ${{ needs.build_and_push.outputs.version }}
+  #         targets: |
+  #           [
+  #             {"target":{"tenant":"ci-nais", "kind":"management"}, "wait": true},
+  #             {"target":{"tenant":"nav", "kind":"management"} }
+  #           ]

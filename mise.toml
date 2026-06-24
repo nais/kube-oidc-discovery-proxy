@@ -1,0 +1,73 @@
+[settings]
+pin = true
+
+[tools]
+go = "1.26.4"
+helm = "3.19.0"
+yq = "4.50.1"
+golangci-lint = "2.12.2"
+
+[tasks.check]
+description = "Run all static checks"
+depends = [
+  "check:golangci-lint",
+  "check:deadcode",
+  "check:gosec",
+  "check:govet",
+  "check:ratchet",
+  "check:staticcheck",
+  "check:govulncheck",
+  "check:helm-lint",
+]
+
+[tasks."check:golangci-lint"]
+description = "Run golangci-lint"
+run = "golangci-lint run"
+
+[tasks."check:deadcode"]
+description = "Run deadcode"
+run = "go tool golang.org/x/tools/cmd/deadcode -test ./..."
+
+[tasks."check:gosec"]
+description = "Run gosec"
+run = "go tool github.com/securego/gosec/v2/cmd/gosec --exclude-generated -terse ./..."
+
+[tasks."check:govet"]
+description = "Run go vet"
+run = "go vet ./..."
+
+[tasks."check:ratchet"]
+description = "Verify all github actions are pinned"
+run = "go tool github.com/sethvargo/ratchet lint .github/workflows/*.yaml"
+
+[tasks."check:staticcheck"]
+description = "Run staticcheck"
+run = "go tool honnef.co/go/tools/cmd/staticcheck ./..."
+
+[tasks."check:govulncheck"]
+description = "Run govulncheck"
+run = "go tool golang.org/x/vuln/cmd/govulncheck ./..."
+
+[tasks."check:helm-lint"]
+description = "Lint helm chart"
+run = "helm lint --strict ./charts"
+
+[tasks.fmt]
+description = "Format all code"
+depends = ["fmt:go"]
+
+[tasks."fmt:go"]
+description = "Format go files using gofumpt"
+run = "go tool mvdan.cc/gofumpt -w ./"
+
+[tasks.test]
+description = "Run tests"
+run = "go test -cover ./..."
+
+[tasks."actions:update"]
+description = "Upgrade github actions to latest version satisfying their version tag"
+run = "go tool github.com/sethvargo/ratchet update .github/workflows/*.yaml"
+
+[tasks."actions:upgrade"]
+description = "Upgrade github actions to latest"
+run = "go tool github.com/sethvargo/ratchet upgrade .github/workflows/*.yaml"

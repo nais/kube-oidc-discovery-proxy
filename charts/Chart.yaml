@@ -1,0 +1,12 @@
+apiVersion: v2
+name: kube-oidc-discovery-proxy
+description: Reverse proxy exposing Kubernetes apiserver OIDC discovery and JWKS endpoints
+
+sources:
+  - https://github.com/nais/kube-oidc-discovery-proxy
+
+type: application
+
+version: 0.1.0
+
+appVersion: "0.1.0"
