@@ -11,8 +11,8 @@ values:
       template: "external.{{.Tenant.Name}}.cloud.nais.io"
   # upstreams is the list of on-prem apiserver hosts to expose, derived from the
   # tenant's on-prem environments. Each entry is reachable from Fasit under
-  # https://<second-label>-apiserver-oidc.<ingressDomain>, e.g. the on-prem env
-  # "dev-fss" -> apiserver.dev-fss.nais.io -> dev-fss-apiserver-oidc.external.nav.cloud.nais.io
+  # https://apiserver-oidc-<second-label>.<ingressDomain>, e.g. the on-prem env
+  # "dev-fss" -> apiserver.dev-fss.nais.io -> apiserver-oidc-dev-fss.external.nav.cloud.nais.io
   upstreams:
     displayName: Upstream apiserver hosts
     computed:
