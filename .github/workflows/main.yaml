@@ -55,19 +55,19 @@ jobs:
       - name: Push Chart
         run: |-
           helm push ${{ env.NAME }}*.tgz ${{ env.FEATURE_REPOSITORY }}
-  # deploy:
-  #   needs:
-  #     - build_and_push
-  #   runs-on: fasit-deploy
-  #   permissions:
-  #     id-token: write
-  #   steps:
-  #     - uses: nais/fasit-deploy@9f870e05e92cde6cfd827b13384ec09e80be65fd # ratchet:nais/fasit-deploy@v4.1.0
-  #       with:
-  #         chart: ${{ env.FEATURE_REPOSITORY }}/${{ env.NAME }}
-  #         version: ${{ needs.build_and_push.outputs.version }}
-  #         targets: |
-  #           [
-  #             {"target":{"tenant":"ci-nais", "kind":"management"}, "wait": true},
-  #             {"target":{"tenant":"nav", "kind":"management"} }
-  #           ]
+  deploy:
+    needs:
+      - build_and_push
+    runs-on: fasit-deploy
+    permissions:
+      id-token: write
+    steps:
+      - uses: nais/fasit-deploy@53e433b1bdd08fc622e03a78584c0832c9083bd3 # ratchet:nais/fasit-deploy@v4.1.1
+        with:
+          chart: ${{ env.FEATURE_REPOSITORY }}/${{ env.NAME }}
+          version: ${{ needs.build_and_push.outputs.version }}
+          targets: |
+            [
+              {"target":{"tenant":"ci-nais", "kind":"management"}, "wait": true},
+              {"target":{"tenant":"nav", "kind":"management"} }
+            ]
