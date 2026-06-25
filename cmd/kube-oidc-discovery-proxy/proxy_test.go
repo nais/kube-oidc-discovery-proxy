@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 )
 
 func TestProxyRoutesByHostAndAllowsOnlyKnownPaths(t *testing.T) {
@@ -18,7 +19,7 @@ func TestProxyRoutesByHostAndAllowsOnlyKnownPaths(t *testing.T) {
 	routes := []route{{Host: "dev-fss.proxy.test", Upstream: upstreamHost}}
 
 	// Use http scheme for the test upstream by registering it directly.
-	h, err := newHandler(routes, slog.New(slog.DiscardHandler))
+	h, err := newHandler(routes, time.Minute, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}
@@ -56,7 +57,7 @@ func TestProxyForwardsAllowedPathToUpstream(t *testing.T) {
 	// override the proxy to use http by registering through newHandler with the
 	// upstream host. The proxy hardcodes https, so we only assert routing here.
 	routes := []route{{Host: "dev-fss.proxy.test", Upstream: upstream.Listener.Addr().String()}}
-	h, err := newHandler(routes, slog.New(slog.DiscardHandler))
+	h, err := newHandler(routes, time.Minute, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}

@@ -6,6 +6,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"time"
 )
 
 // allowedPaths are the only request paths the proxy forwards. They expose the
@@ -16,7 +17,7 @@ var allowedPaths = map[string]bool{
 	"/openid/v1/jwks":                   true,
 }
 
-func newHandler(routes []route, log *slog.Logger) (http.Handler, error) {
+func newHandler(routes []route, cacheTTL time.Duration, log *slog.Logger) (http.Handler, error) {
 	proxies := make(map[string]*httputil.ReverseProxy, len(routes))
 	for _, r := range routes {
 		target := &url.URL{Scheme: "https", Host: r.Upstream}
@@ -26,7 +27,8 @@ func newHandler(routes []route, log *slog.Logger) (http.Handler, error) {
 				pr.SetURL(target)
 				pr.Out.Host = upstream
 			},
-			ErrorLog: slog.NewLogLogger(log.Handler(), slog.LevelError),
+			Transport: newCachingTransport(http.DefaultTransport, cacheTTL, log.With("upstream", upstream)),
+			ErrorLog:  slog.NewLogLogger(log.Handler(), slog.LevelError),
 		}
 		proxies[r.Host] = rp
 		log.With("host", r.Host, "upstream", r.Upstream).Info("registered route")

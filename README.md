@@ -37,11 +37,16 @@ kube-oidc-discovery-proxy \
   --target apiserver-oidc-prod-fss.example.com=apiserver.prod-fss.nais.io
 ```
 
-| Flag | Description | Default |
-|------|-------------|---------|
-| `--bind-address` | Address to listen on | `:8080` |
-| `--target` | `host=upstream` route, repeatable | — |
-| `--log-level` | Log level (`debug`, `info`, `warn`, `error`) | `info` |
+| Flag             | Description                                    | Default |
+|------------------|------------------------------------------------|---------|
+| `--bind-address` | Address to listen on                           | `:8080` |
+| `--target`       | `host=upstream` route, repeatable              | —       |
+| `--cache-ttl`    | How long to cache upstream discovery responses | `1m`    |
+| `--log-level`    | Log level (`debug`, `info`, `warn`, `error`)   | `info`  |
+
+## Caching
+
+The discovery document and JWKS rarely change, so each successful upstream response is cached for `--cache-ttl` and served from memory. If a refresh fails while a stale entry exists, the stale entry is served so token validation keeps working through transient upstream outages.
 
 ## Local development
 

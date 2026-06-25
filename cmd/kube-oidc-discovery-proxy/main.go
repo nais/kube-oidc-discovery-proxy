@@ -15,6 +15,7 @@ var cfg = DefaultConfig()
 func init() {
 	flag.StringVar(&cfg.BindAddress, "bind-address", cfg.BindAddress, "address to listen on")
 	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "which log level to output")
+	flag.DurationVar(&cfg.CacheTTL, "cache-ttl", cfg.CacheTTL, "how long to cache upstream discovery responses")
 	flag.Var(targets{routes: &cfg.Routes}, "target", "host=upstream route, repeatable")
 }
 
@@ -31,7 +32,7 @@ func main() {
 }
 
 func run(ctx context.Context, log *slog.Logger) error {
-	handler, err := newHandler(cfg.Routes, log)
+	handler, err := newHandler(cfg.Routes, cfg.CacheTTL, log)
 	if err != nil {
 		return err
 	}

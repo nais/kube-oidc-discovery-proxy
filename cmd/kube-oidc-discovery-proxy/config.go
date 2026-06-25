@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // route maps an inbound request host to the upstream apiserver host it should
@@ -16,6 +17,7 @@ type route struct {
 type Config struct {
 	BindAddress string
 	LogLevel    string
+	CacheTTL    time.Duration
 	Routes      []route
 }
 
@@ -23,6 +25,7 @@ func DefaultConfig() Config {
 	return Config{
 		BindAddress: ":8080",
 		LogLevel:    "info",
+		CacheTTL:    time.Minute,
 	}
 }
 
