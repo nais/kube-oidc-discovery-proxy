@@ -22,7 +22,11 @@ serviceAccount:
 
 podAnnotations: {}
 
-podSecurityContext: {}
+podSecurityContext:
+  fsGroup: 1069
+  fsGroupChangePolicy: OnRootMismatch
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
   capabilities:
@@ -31,11 +35,24 @@ securityContext:
   seccompProfile:
     type: RuntimeDefault
   allowPrivilegeEscalation: false
+  privileged: false
   readOnlyRootFilesystem: true
   runAsNonRoot: true
-  runAsUser: 65532
+  runAsUser: 1069
+  runAsGroup: 1069
 
-resources: {}
+resources:
+  limits:
+    memory: 1Gi
+  requests:
+    memory: 32Mi
+    cpu: 10m
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 75
 
 nodeSelector: {}
 
