@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"strings"
 	"time"
@@ -27,6 +28,19 @@ func DefaultConfig() Config {
 		LogLevel:    "info",
 		CacheTTL:    time.Minute,
 	}
+}
+
+func parseFlags(args []string) (Config, error) {
+	cfg := DefaultConfig()
+	flags := flag.NewFlagSet("kube-oidc-discovery-proxy", flag.ContinueOnError)
+	flags.StringVar(&cfg.BindAddress, "bind-address", cfg.BindAddress, "address to listen on")
+	flags.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "which log level to output")
+	flags.DurationVar(&cfg.CacheTTL, "cache-ttl", cfg.CacheTTL, "how long to cache upstream discovery responses")
+	flags.Var(targets{routes: &cfg.Routes}, "target", "host=upstream route, repeatable")
+	if err := flags.Parse(args); err != nil {
+		return Config{}, err
+	}
+	return cfg, nil
 }
 
 // targets is a flag.Value accepting repeated host=upstream pairs.

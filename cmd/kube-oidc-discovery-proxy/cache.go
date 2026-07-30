@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -18,6 +19,9 @@ const (
 	maxBodyBytes = 1 << 20 // 1 MiB
 	// fetchTimeout bounds a single upstream request.
 	fetchTimeout = 10 * time.Second
+	// monitorInterval is the cadence at which the background monitor forces an
+	// upstream refresh, independent of cacheTTL.
+	monitorInterval = 30 * time.Second
 )
 
 // cachedResponse is an immutable, fully buffered snapshot of an upstream
@@ -36,37 +40,44 @@ type cachedResponse struct {
 // refreshes of the same path into one upstream request, preventing a stampede.
 // On upstream failure a stale entry is served if one exists.
 type cachingTransport struct {
-	base http.RoundTripper
-	ttl  time.Duration
-	log  *slog.Logger
+	base       http.RoundTripper
+	ttl        time.Duration
+	log        *slog.Logger
+	upstreamUp *prometheus.GaugeVec
 
 	sf      singleflight.Group
 	mu      sync.RWMutex
 	entries map[string]*cachedResponse
 }
 
-func newCachingTransport(base http.RoundTripper, ttl time.Duration, log *slog.Logger) *cachingTransport {
+func newCachingTransport(base http.RoundTripper, ttl time.Duration, log *slog.Logger, upstreamUp *prometheus.GaugeVec) *cachingTransport {
 	return &cachingTransport{
-		base:    base,
-		ttl:     ttl,
-		log:     log,
-		entries: make(map[string]*cachedResponse),
+		base:       base,
+		ttl:        ttl,
+		log:        log,
+		upstreamUp: upstreamUp,
+		entries:    make(map[string]*cachedResponse),
 	}
 }
 
 func (t *cachingTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	return t.roundTrip(req, false)
+}
+
+func (t *cachingTransport) roundTrip(req *http.Request, force bool) (*http.Response, error) {
 	key := req.URL.Host + req.URL.Path
-	if e := t.fresh(key); e != nil {
+	if e := t.freshUnlessForced(key, force); e != nil {
 		return responseFromCache(req, e), nil
 	}
 
 	v, err, _ := t.sf.Do(key, func() (any, error) {
 		// Another caller may have refreshed while this one waited on the group.
-		if e := t.fresh(key); e != nil {
+		if e := t.freshUnlessForced(key, force); e != nil {
 			return e, nil
 		}
 		e, err := t.load(req)
 		if err != nil {
+			t.upstreamUp.WithLabelValues(req.URL.Host, req.URL.Path).Set(0)
 			if stale := t.cached(key); stale != nil {
 				t.log.With("path", req.URL.Path, "upstream", req.URL.Host, "err", err).
 					Warn("serving stale cache after upstream error")
@@ -74,11 +85,13 @@ func (t *cachingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 			}
 			return nil, err
 		}
-		// Only cache good documents; non-200s are passed through uncached.
 		if e.status == http.StatusOK {
+			t.upstreamUp.WithLabelValues(req.URL.Host, req.URL.Path).Set(1)
 			t.mu.Lock()
 			t.entries[key] = e
 			t.mu.Unlock()
+		} else {
+			t.upstreamUp.WithLabelValues(req.URL.Host, req.URL.Path).Set(0)
 		}
 		return e, nil
 	})
@@ -133,6 +146,13 @@ func (t *cachingTransport) fresh(key string) *cachedResponse {
 	return nil
 }
 
+func (t *cachingTransport) freshUnlessForced(key string, force bool) *cachedResponse {
+	if force {
+		return nil
+	}
+	return t.fresh(key)
+}
+
 // responseFromCache builds an independent *http.Response from an immutable
 // cache entry, giving each caller its own body reader.
 func responseFromCache(req *http.Request, e *cachedResponse) *http.Response {
@@ -146,5 +166,51 @@ func responseFromCache(req *http.Request, e *cachedResponse) *http.Response {
 		Body:          io.NopCloser(bytes.NewReader(e.body)),
 		ContentLength: int64(len(e.body)),
 		Request:       req,
+	}
+}
+
+// forceRefresh bypasses the TTL cache and fetches directly from upstream,
+// updating the cache entry and gauge. Used by the monitor.
+func (t *cachingTransport) forceRefresh(ctx context.Context, upstream, path string) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+upstream+path, nil)
+	if err != nil {
+		return
+	}
+
+	resp, err := t.roundTrip(req, true)
+	if err != nil {
+		t.log.With("upstream", upstream, "path", path, "err", err).Debug("monitor refresh failed")
+		return
+	}
+	_ = resp.Body.Close()
+}
+
+// startMonitor launches a background goroutine that forces an upstream refresh
+// every interval, keeping the upstream_up gauge current without client traffic.
+// The goroutine terminates when ctx is cancelled.
+func (t *cachingTransport) startMonitor(ctx context.Context, upstream string, paths []string, interval time.Duration) {
+	go t.runMonitor(ctx, upstream, paths, interval)
+}
+
+func (t *cachingTransport) runMonitor(ctx context.Context, upstream string, paths []string, interval time.Duration) {
+	poll := func() {
+		for _, path := range paths {
+			if ctx.Err() != nil {
+				return
+			}
+			t.forceRefresh(ctx, upstream, path)
+		}
+	}
+
+	poll() // immediate first poll
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			poll()
+		}
 	}
 }

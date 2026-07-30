@@ -4,10 +4,16 @@ A minimal reverse proxy that exposes only the OIDC discovery document and JWKS o
 
 This is mainly intended for on-prem environments where exposing an ingress for the entire apiserver is undesirable or not possible. Instead of opening up the apiserver, the proxy forwards just the two endpoints needed for token validation.
 
-Only these paths are forwarded per configured host; everything else returns 404:
+Only these paths are forwarded per configured host:
 
 - `/.well-known/openid-configuration`
 - `/openid/v1/jwks`
+
+The listener also exposes internal operational endpoints that are not included
+in the ingress:
+
+- `/internal/healthz` always returns HTTP 200 for liveness and readiness checks.
+- `/internal/metrics` exposes Prometheus metrics, including upstream availability.
 
 ## How it works
 

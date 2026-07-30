@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"log/slog"
 	"net/http"
@@ -10,29 +11,28 @@ import (
 	"time"
 )
 
-var cfg = DefaultConfig()
-
-func init() {
-	flag.StringVar(&cfg.BindAddress, "bind-address", cfg.BindAddress, "address to listen on")
-	flag.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "which log level to output")
-	flag.DurationVar(&cfg.CacheTTL, "cache-ttl", cfg.CacheTTL, "how long to cache upstream discovery responses")
-	flag.Var(targets{routes: &cfg.Routes}, "target", "host=upstream route, repeatable")
-}
-
 func main() {
-	flag.Parse()
+	cfg, err := parseFlags(os.Args[1:])
+	if errors.Is(err, flag.ErrHelp) {
+		return
+	}
+	if err != nil {
+		slog.Error("parse flags", "err", err)
+		os.Exit(2)
+	}
+
 	log := newLogger(cfg.LogLevel)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	if err := run(ctx, log); err != nil {
+	if err := run(ctx, cfg, log); err != nil {
 		log.With("err", err).Error("fatal")
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, log *slog.Logger) error {
-	handler, err := newHandler(cfg.Routes, cfg.CacheTTL, log)
+func run(ctx context.Context, cfg Config, log *slog.Logger) error {
+	handler, err := newHandler(ctx, cfg.Routes, cfg.CacheTTL, log)
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func run(ctx context.Context, log *slog.Logger) error {
 	}()
 
 	log.With("addr", cfg.BindAddress).Info("kube-oidc-discovery-proxy serving")
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}
 	return nil

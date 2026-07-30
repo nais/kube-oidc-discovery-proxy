@@ -5,9 +5,26 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestHealthzAlways200(t *testing.T) {
+	h, err := newHandler(t.Context(), nil, time.Minute, slog.New(slog.DiscardHandler))
+	if err != nil {
+		t.Fatalf("newHandler: %v", err)
+	}
+
+	for _, host := range []string{"", "some.other.host", "internal"} {
+		req := httptest.NewRequest(http.MethodGet, "http://"+host+"/internal/healthz", nil)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Errorf("host=%q: got %d, want 200", host, rec.Code)
+		}
+	}
+}
 
 func TestProxyRoutesByHostAndAllowsOnlyKnownPaths(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -18,8 +35,10 @@ func TestProxyRoutesByHostAndAllowsOnlyKnownPaths(t *testing.T) {
 	upstreamHost := upstream.Listener.Addr().String()
 	routes := []route{{Host: "dev-fss.proxy.test", Upstream: upstreamHost}}
 
+	ctx := t.Context()
+
 	// Use http scheme for the test upstream by registering it directly.
-	h, err := newHandler(routes, time.Minute, slog.New(slog.DiscardHandler))
+	h, err := newHandler(ctx, routes, time.Minute, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}
@@ -47,6 +66,20 @@ func TestProxyRoutesByHostAndAllowsOnlyKnownPaths(t *testing.T) {
 	}
 }
 
+func TestNewHandlerRejectsDuplicateRouteHosts(t *testing.T) {
+	routes := []route{
+		{Host: "dup.proxy.test", Upstream: "upstream1.example.com"},
+		{Host: "dup.proxy.test", Upstream: "upstream2.example.com"},
+	}
+	_, err := newHandler(t.Context(), routes, time.Minute, slog.New(slog.DiscardHandler))
+	if err == nil {
+		t.Fatal("expected error for duplicate host, got nil")
+	}
+	if !strings.Contains(err.Error(), "dup.proxy.test") {
+		t.Errorf("error should mention duplicate host, got: %v", err)
+	}
+}
+
 func TestProxyForwardsAllowedPathToUpstream(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.WriteString(w, "upstream:"+r.URL.Path)
@@ -57,7 +90,10 @@ func TestProxyForwardsAllowedPathToUpstream(t *testing.T) {
 	// override the proxy to use http by registering through newHandler with the
 	// upstream host. The proxy hardcodes https, so we only assert routing here.
 	routes := []route{{Host: "dev-fss.proxy.test", Upstream: upstream.Listener.Addr().String()}}
-	h, err := newHandler(routes, time.Minute, slog.New(slog.DiscardHandler))
+
+	ctx := t.Context()
+
+	h, err := newHandler(ctx, routes, time.Minute, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}

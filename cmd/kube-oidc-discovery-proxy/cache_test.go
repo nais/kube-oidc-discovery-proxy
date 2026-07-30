@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"io"
 	"log/slog"
 	"net/http"
@@ -9,9 +10,16 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
 func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
+
+func newTestGauge() *prometheus.GaugeVec {
+	return prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: "test_upstream_up"}, []string{"upstream", "path"})
+}
 
 // roundTrip drives the transport the way ReverseProxy would: it issues a GET to
 // the upstream and returns the buffered body and response.
@@ -43,10 +51,10 @@ func TestCachingTransportServesFromCacheWithinTTL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger())
+	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		resp, body := roundTrip(t, tr, addr, "/openid/v1/jwks")
 		if body != `{"issuer":"x"}` {
 			t.Fatalf("unexpected body %q", body)
@@ -68,7 +76,7 @@ func TestCachingTransportRefetchesAfterTTL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Nanosecond, discardLogger())
+	tr := newCachingTransport(srv.Client().Transport, time.Nanosecond, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
 	roundTrip(t, tr, addr, "/openid/v1/jwks")
@@ -92,20 +100,18 @@ func TestCachingTransportSingleflightCollapsesConcurrentRefresh(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger())
+	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
 	var wg sync.WaitGroup
 	// First caller triggers the fetch and blocks in the handler.
-	wg.Add(1)
-	go func() { defer wg.Done(); roundTrip(t, tr, addr, "/openid/v1/jwks") }()
+	wg.Go(func() { roundTrip(t, tr, addr, "/openid/v1/jwks") })
 	<-entered // upstream request is now in flight
 
 	// Additional callers arrive while the fetch is in flight; they must join the
 	// in-flight singleflight call rather than issue new upstream requests.
-	for i := 0; i < 5; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); roundTrip(t, tr, addr, "/openid/v1/jwks") }()
+	for range 5 {
+		wg.Go(func() { roundTrip(t, tr, addr, "/openid/v1/jwks") })
 	}
 	time.Sleep(20 * time.Millisecond) // let late callers register on the group
 	close(release)
@@ -123,7 +129,7 @@ func TestCachingTransportServesStaleOnUpstreamError(t *testing.T) {
 	addr := srv.Listener.Addr().String()
 
 	// ttl=0 makes every entry immediately stale, forcing a refetch each call.
-	tr := newCachingTransport(srv.Client().Transport, 0, discardLogger())
+	tr := newCachingTransport(srv.Client().Transport, 0, discardLogger(), newTestGauge())
 
 	_, body := roundTrip(t, tr, addr, "/openid/v1/jwks") // primes the cache
 	if body != "fresh" {
@@ -146,7 +152,7 @@ func TestCachingTransportDoesNotCacheNon200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger())
+	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
 	resp, _ := roundTrip(t, tr, addr, "/openid/v1/jwks")
@@ -156,5 +162,118 @@ func TestCachingTransportDoesNotCacheNon200(t *testing.T) {
 	roundTrip(t, tr, addr, "/openid/v1/jwks")
 	if got := atomic.LoadInt32(&hits); got != 2 {
 		t.Fatalf("non-200 must not be cached: expected 2 hits, got %d", got)
+	}
+}
+
+// TestMonitorForcesSecondUpstreamHitAfterTicker verifies that the monitor
+// issues a second upstream request after the ticker fires, even with no client
+// traffic and an unexpired cache entry.
+func TestMonitorForcesSecondUpstreamHitAfterTicker(t *testing.T) {
+	var hits int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = io.WriteString(w, `{"issuer":"x"}`)
+	}))
+	defer srv.Close()
+
+	g := newTestGauge()
+	// long TTL so normal requests would not refetch
+	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), g)
+	addr := srv.Listener.Addr().String()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+
+	// Use a very short interval so the ticker fires quickly.
+	interval := 20 * time.Millisecond
+	go tr.runMonitor(ctx, addr, []string{"/openid/v1/jwks"}, interval)
+
+	// Wait for at least 2 upstream hits (immediate poll + at least one ticker tick).
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(&hits) >= 2 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if got := atomic.LoadInt32(&hits); got < 2 {
+		t.Fatalf("expected ≥2 upstream hits from monitor ticks, got %d", got)
+	}
+
+	// Gauge must show 1 (success).
+	if v := testutil.ToFloat64(g.WithLabelValues(addr, "/openid/v1/jwks")); v != 1 {
+		t.Errorf("expected gauge 1, got %v", v)
+	}
+}
+
+func TestMonitorKeepsStaleCacheAfterRefreshFailure(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "cached")
+	}))
+	addr := srv.Listener.Addr().String()
+
+	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
+	_, body := roundTrip(t, tr, addr, "/openid/v1/jwks")
+	if body != "cached" {
+		t.Fatalf("unexpected body %q", body)
+	}
+
+	srv.Close()
+	tr.forceRefresh(t.Context(), addr, "/openid/v1/jwks")
+
+	_, body = roundTrip(t, tr, addr, "/openid/v1/jwks")
+	if body != "cached" {
+		t.Fatalf("expected stale body after monitor failure, got %q", body)
+	}
+}
+
+// TestMonitorStopsOnContextCancellation verifies that after ctx is cancelled,
+// no further upstream hits occur.
+func TestMonitorStopsOnContextCancellation(t *testing.T) {
+	var hits int32
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		atomic.AddInt32(&hits, 1)
+		_, _ = io.WriteString(w, `{"issuer":"x"}`)
+	}))
+	defer srv.Close()
+
+	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
+	addr := srv.Listener.Addr().String()
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	// Short interval so we can confirm the monitor is running before cancelling.
+	interval := 20 * time.Millisecond
+	done := make(chan struct{})
+	go func() {
+		tr.runMonitor(ctx, addr, []string{"/openid/v1/jwks"}, interval)
+		close(done)
+	}()
+
+	// Wait for at least one hit to confirm the monitor started.
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt32(&hits) >= 1 {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if atomic.LoadInt32(&hits) == 0 {
+		t.Fatal("monitor never fired")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("monitor goroutine did not stop after context cancellation")
+	}
+
+	// No more hits after cancel.
+	hitsBefore := atomic.LoadInt32(&hits)
+	time.Sleep(3 * interval)
+	if after := atomic.LoadInt32(&hits); after > hitsBefore {
+		t.Errorf("monitor continued hitting upstream after cancel: before=%d after=%d", hitsBefore, after)
 	}
 }

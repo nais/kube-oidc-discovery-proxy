@@ -1,0 +1,23 @@
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PodMonitor
+metadata:
+  name: {{ include "kube-oidc-discovery-proxy.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kube-oidc-discovery-proxy.labels" . | nindent 4 }}
+spec:
+  podTargetLabels:
+    - app
+  podMetricsEndpoints:
+    - interval: 1m
+      port: http
+      path: /internal/metrics
+      scrapeTimeout: 10s
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  selector:
+    matchLabels:
+      {{- include "kube-oidc-discovery-proxy.selectorLabels" . | nindent 6 }}
+{{- end }}

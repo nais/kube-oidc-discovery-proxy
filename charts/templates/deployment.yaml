@@ -17,6 +17,7 @@ spec:
       {{- end }}
       labels:
         {{- include "kube-oidc-discovery-proxy.selectorLabels" . | nindent 8 }}
+        app: {{ include "kube-oidc-discovery-proxy.name" . }}
         tenant: {{ .Values.tenantName }}
     spec:
       {{- with .Values.imagePullSecrets }}
@@ -42,6 +43,14 @@ spec:
           ports:
             - name: http
               containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /internal/healthz
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /internal/healthz
+              port: http
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

@@ -1,0 +1,35 @@
+{{- if .Capabilities.APIVersions.Has "monitoring.coreos.com/v1" }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "kube-oidc-discovery-proxy.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "kube-oidc-discovery-proxy.labels" . | nindent 4 }}
+    team: {{ .Release.Namespace }}
+spec:
+  groups:
+    - name: kube-oidc-discovery-proxy
+      rules:
+        - alert: KubeOidcDiscoveryProxyUpstreamUnavailable
+          expr: max by (upstream, path) (kube_oidc_discovery_proxy_upstream_up{namespace={{ .Release.Namespace | quote }}}) == 0
+          for: 10m
+          annotations:
+            summary: "Kubernetes OIDC discovery upstream is unavailable"
+            consequence: "The proxy is serving stale data when available, but new OIDC discovery data cannot be fetched."
+            action: "Check connectivity from kube-oidc-discovery-proxy to {{ `{{ $labels.upstream }}` }} and inspect its logs."
+            message: "Fetches from {{ `{{ $labels.upstream }}{{ $labels.path }}` }} have failed for at least 10 minutes."
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+        - alert: KubeOidcDiscoveryProxyMetricsMissing
+          expr: absent(kube_oidc_discovery_proxy_upstream_up{namespace={{ .Release.Namespace | quote }}})
+          for: 10m
+          annotations:
+            summary: "Kubernetes OIDC discovery proxy metrics are missing"
+            consequence: "Upstream availability is not being monitored."
+            action: "Check the kube-oidc-discovery-proxy pods, PodMonitor, NetworkPolicy, and Prometheus targets."
+          labels:
+            severity: warning
+            namespace: {{ .Release.Namespace }}
+{{- end }}
