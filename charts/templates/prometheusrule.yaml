@@ -22,6 +22,7 @@ spec:
           labels:
             severity: warning
             namespace: {{ .Release.Namespace }}
+            dashboard_url: "https://monitoring.nais.io/d/actcss7/kube-oidc-discovery-proxy?var-tenant={{ .Values.fasit.tenant.name }}"
         - alert: KubeOidcDiscoveryProxyMetricsMissing
           expr: absent(kube_oidc_discovery_proxy_upstream_up{namespace={{ .Release.Namespace | quote }}})
           for: 10m
@@ -32,4 +33,5 @@ spec:
           labels:
             severity: warning
             namespace: {{ .Release.Namespace }}
+            dashboard_url: "https://monitoring.nais.io/d/actcss7/kube-oidc-discovery-proxy?var-tenant={{ .Values.fasit.tenant.name }}"
 {{- end }}
