@@ -1,0 +1,37 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Oslo"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Oslo"
+    groups:
+      gh-actions:
+        patterns:
+          - "*"
+    cooldown:
+      default-days: 7
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Europe/Oslo"
+    groups:
+      docker:
+        patterns:
+          - "*"
+    cooldown:
+      default-days: 7
