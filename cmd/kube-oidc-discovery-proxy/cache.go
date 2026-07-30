@@ -19,29 +19,26 @@ const (
 	maxBodyBytes = 1 << 20 // 1 MiB
 	// fetchTimeout bounds a single upstream request.
 	fetchTimeout = 10 * time.Second
-	// monitorInterval is the cadence at which the background monitor forces an
-	// upstream refresh, independent of cacheTTL.
-	monitorInterval = 30 * time.Second
+	// monitorInterval is the cadence at which the background monitor refreshes
+	// cached upstream responses.
+	monitorInterval = time.Minute
 )
 
 // cachedResponse is an immutable, fully buffered snapshot of an upstream
 // response. The body is stored as bytes so each caller can be handed an
 // independent reader.
 type cachedResponse struct {
-	status  int
-	header  http.Header
-	body    []byte
-	fetched time.Time
+	status int
+	header http.Header
+	body   []byte
 }
 
 // cachingTransport is an http.RoundTripper for use as a ReverseProxy.Transport.
-// Discovery endpoints rarely change, so successful (200) responses are cached
-// for ttl and shared across requests. singleflight collapses concurrent
-// refreshes of the same path into one upstream request, preventing a stampede.
-// On upstream failure a stale entry is served if one exists.
+// Successful responses are cached and shared across requests. The background
+// monitor refreshes them periodically; failed refreshes preserve the last good
+// response. singleflight collapses concurrent fetches of the same path.
 type cachingTransport struct {
 	base       http.RoundTripper
-	ttl        time.Duration
 	log        *slog.Logger
 	upstreamUp *prometheus.GaugeVec
 
@@ -50,10 +47,9 @@ type cachingTransport struct {
 	entries map[string]*cachedResponse
 }
 
-func newCachingTransport(base http.RoundTripper, ttl time.Duration, log *slog.Logger, upstreamUp *prometheus.GaugeVec) *cachingTransport {
+func newCachingTransport(base http.RoundTripper, log *slog.Logger, upstreamUp *prometheus.GaugeVec) *cachingTransport {
 	return &cachingTransport{
 		base:       base,
-		ttl:        ttl,
 		log:        log,
 		upstreamUp: upstreamUp,
 		entries:    make(map[string]*cachedResponse),
@@ -66,13 +62,13 @@ func (t *cachingTransport) RoundTrip(req *http.Request) (*http.Response, error) 
 
 func (t *cachingTransport) roundTrip(req *http.Request, force bool) (*http.Response, error) {
 	key := req.URL.Host + req.URL.Path
-	if e := t.freshUnlessForced(key, force); e != nil {
+	if e := t.cachedUnlessForced(key, force); e != nil {
 		return responseFromCache(req, e), nil
 	}
 
 	v, err, _ := t.sf.Do(key, func() (any, error) {
 		// Another caller may have refreshed while this one waited on the group.
-		if e := t.freshUnlessForced(key, force); e != nil {
+		if e := t.cachedUnlessForced(key, force); e != nil {
 			return e, nil
 		}
 		e, err := t.load(req)
@@ -126,10 +122,9 @@ func (t *cachingTransport) load(req *http.Request) (*cachedResponse, error) {
 	header.Del("Transfer-Encoding")
 
 	return &cachedResponse{
-		status:  resp.StatusCode,
-		header:  header,
-		body:    body,
-		fetched: time.Now(),
+		status: resp.StatusCode,
+		header: header,
+		body:   body,
 	}, nil
 }
 
@@ -139,18 +134,11 @@ func (t *cachingTransport) cached(key string) *cachedResponse {
 	return t.entries[key]
 }
 
-func (t *cachingTransport) fresh(key string) *cachedResponse {
-	if e := t.cached(key); e != nil && time.Since(e.fetched) < t.ttl {
-		return e
-	}
-	return nil
-}
-
-func (t *cachingTransport) freshUnlessForced(key string, force bool) *cachedResponse {
+func (t *cachingTransport) cachedUnlessForced(key string, force bool) *cachedResponse {
 	if force {
 		return nil
 	}
-	return t.fresh(key)
+	return t.cached(key)
 }
 
 // responseFromCache builds an independent *http.Response from an immutable
@@ -169,8 +157,8 @@ func responseFromCache(req *http.Request, e *cachedResponse) *http.Response {
 	}
 }
 
-// forceRefresh bypasses the TTL cache and fetches directly from upstream,
-// updating the cache entry and gauge. Used by the monitor.
+// forceRefresh bypasses the cache and fetches directly from upstream, updating
+// the cache entry and gauge. Used by the monitor.
 func (t *cachingTransport) forceRefresh(ctx context.Context, upstream, path string) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://"+upstream+path, nil)
 	if err != nil {

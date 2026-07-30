@@ -8,7 +8,6 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -21,7 +20,7 @@ var allowedPaths = map[string]bool{
 	"/openid/v1/jwks":                   true,
 }
 
-func newHandler(ctx context.Context, routes []route, cacheTTL time.Duration, log *slog.Logger) (http.Handler, error) {
+func newHandler(ctx context.Context, routes []route, log *slog.Logger) (http.Handler, error) {
 	// Validate for duplicate hosts before doing any work.
 	seen := make(map[string]struct{}, len(routes))
 	for _, r := range routes {
@@ -47,7 +46,7 @@ func newHandler(ctx context.Context, routes []route, cacheTTL time.Duration, log
 		for _, path := range paths {
 			upstreamUp.WithLabelValues(upstream, path).Set(0)
 		}
-		ct := newCachingTransport(http.DefaultTransport, cacheTTL, log.With("upstream", upstream), upstreamUp)
+		ct := newCachingTransport(http.DefaultTransport, log.With("upstream", upstream), upstreamUp)
 		ct.startMonitor(ctx, upstream, paths, monitorInterval)
 		rp := &httputil.ReverseProxy{
 			Rewrite: func(pr *httputil.ProxyRequest) {

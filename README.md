@@ -47,12 +47,11 @@ kube-oidc-discovery-proxy \
 |------------------|------------------------------------------------|---------|
 | `--bind-address` | Address to listen on                           | `:8080` |
 | `--target`       | `host=upstream` route, repeatable              | —       |
-| `--cache-ttl`    | How long to cache upstream discovery responses | `1m`    |
 | `--log-level`    | Log level (`debug`, `info`, `warn`, `error`)   | `info`  |
 
 ## Caching
 
-The discovery document and JWKS rarely change, so each successful upstream response is cached for `--cache-ttl` and served from memory. If a refresh fails while a stale entry exists, the stale entry is served so token validation keeps working through transient upstream outages.
+The discovery document and JWKS rarely change, so successful upstream responses are cached and served from memory. A background monitor refreshes them every minute. If a refresh fails, the last successful response remains cached so token validation keeps working through upstream outages.
 
 ## Local development
 

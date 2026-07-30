@@ -41,7 +41,7 @@ func roundTrip(t *testing.T, tr http.RoundTripper, target, path string) (*http.R
 	return resp, string(body)
 }
 
-func TestCachingTransportServesFromCacheWithinTTL(t *testing.T) {
+func TestCachingTransportServesFromCache(t *testing.T) {
 	var hits int32
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		atomic.AddInt32(&hits, 1)
@@ -51,7 +51,7 @@ func TestCachingTransportServesFromCacheWithinTTL(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
+	tr := newCachingTransport(srv.Client().Transport, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
 	for range 3 {
@@ -68,26 +68,6 @@ func TestCachingTransportServesFromCacheWithinTTL(t *testing.T) {
 	}
 }
 
-func TestCachingTransportRefetchesAfterTTL(t *testing.T) {
-	var hits int32
-	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		atomic.AddInt32(&hits, 1)
-		_, _ = io.WriteString(w, "ok")
-	}))
-	defer srv.Close()
-
-	tr := newCachingTransport(srv.Client().Transport, time.Nanosecond, discardLogger(), newTestGauge())
-	addr := srv.Listener.Addr().String()
-
-	roundTrip(t, tr, addr, "/openid/v1/jwks")
-	time.Sleep(time.Millisecond)
-	roundTrip(t, tr, addr, "/openid/v1/jwks")
-
-	if got := atomic.LoadInt32(&hits); got != 2 {
-		t.Fatalf("expected 2 upstream hits after TTL expiry, got %d", got)
-	}
-}
-
 func TestCachingTransportSingleflightCollapsesConcurrentRefresh(t *testing.T) {
 	var hits int32
 	entered := make(chan struct{})
@@ -100,7 +80,7 @@ func TestCachingTransportSingleflightCollapsesConcurrentRefresh(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
+	tr := newCachingTransport(srv.Client().Transport, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
 	var wg sync.WaitGroup
@@ -122,14 +102,13 @@ func TestCachingTransportSingleflightCollapsesConcurrentRefresh(t *testing.T) {
 	}
 }
 
-func TestCachingTransportServesStaleOnUpstreamError(t *testing.T) {
+func TestCachingTransportServesCachedResponseWhenUpstreamIsUnavailable(t *testing.T) {
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = io.WriteString(w, "fresh")
 	}))
 	addr := srv.Listener.Addr().String()
 
-	// ttl=0 makes every entry immediately stale, forcing a refetch each call.
-	tr := newCachingTransport(srv.Client().Transport, 0, discardLogger(), newTestGauge())
+	tr := newCachingTransport(srv.Client().Transport, discardLogger(), newTestGauge())
 
 	_, body := roundTrip(t, tr, addr, "/openid/v1/jwks") // primes the cache
 	if body != "fresh" {
@@ -152,7 +131,7 @@ func TestCachingTransportDoesNotCacheNon200(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
+	tr := newCachingTransport(srv.Client().Transport, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
 	resp, _ := roundTrip(t, tr, addr, "/openid/v1/jwks")
@@ -177,8 +156,7 @@ func TestMonitorForcesSecondUpstreamHitAfterTicker(t *testing.T) {
 	defer srv.Close()
 
 	g := newTestGauge()
-	// long TTL so normal requests would not refetch
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), g)
+	tr := newCachingTransport(srv.Client().Transport, discardLogger(), g)
 	addr := srv.Listener.Addr().String()
 
 	ctx, cancel := context.WithCancel(t.Context())
@@ -213,7 +191,7 @@ func TestMonitorKeepsStaleCacheAfterRefreshFailure(t *testing.T) {
 	}))
 	addr := srv.Listener.Addr().String()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
+	tr := newCachingTransport(srv.Client().Transport, discardLogger(), newTestGauge())
 	_, body := roundTrip(t, tr, addr, "/openid/v1/jwks")
 	if body != "cached" {
 		t.Fatalf("unexpected body %q", body)
@@ -238,7 +216,7 @@ func TestMonitorStopsOnContextCancellation(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, discardLogger(), newTestGauge())
+	tr := newCachingTransport(srv.Client().Transport, discardLogger(), newTestGauge())
 	addr := srv.Listener.Addr().String()
 
 	ctx, cancel := context.WithCancel(t.Context())

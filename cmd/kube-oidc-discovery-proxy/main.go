@@ -32,7 +32,7 @@ func main() {
 }
 
 func run(ctx context.Context, cfg Config, log *slog.Logger) error {
-	handler, err := newHandler(ctx, cfg.Routes, cfg.CacheTTL, log)
+	handler, err := newHandler(ctx, cfg.Routes, log)
 	if err != nil {
 		return err
 	}

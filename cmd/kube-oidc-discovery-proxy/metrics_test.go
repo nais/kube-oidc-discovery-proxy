@@ -17,7 +17,7 @@ func TestMetricsScrapeContainsUpstreamUp(t *testing.T) {
 
 	ctx := t.Context()
 
-	h, err := newHandler(ctx, routes, time.Minute, slog.New(slog.DiscardHandler))
+	h, err := newHandler(ctx, routes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}
@@ -42,7 +42,7 @@ func TestUpstreamUpGauge1On200(t *testing.T) {
 	defer srv.Close()
 
 	_, upstreamUp := newRegistry()
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, slog.New(slog.DiscardHandler), upstreamUp)
+	tr := newCachingTransport(srv.Client().Transport, slog.New(slog.DiscardHandler), upstreamUp)
 	addr := srv.Listener.Addr().String()
 
 	roundTrip(t, tr, addr, "/openid/v1/jwks")
@@ -59,13 +59,12 @@ func TestUpstreamUpGauge0OnTransportError(t *testing.T) {
 	addr := srv.Listener.Addr().String()
 
 	_, upstreamUp := newRegistry()
-	// ttl=0 so every request re-fetches.
-	tr := newCachingTransport(srv.Client().Transport, 0, slog.New(slog.DiscardHandler), upstreamUp)
+	tr := newCachingTransport(srv.Client().Transport, slog.New(slog.DiscardHandler), upstreamUp)
 	roundTrip(t, tr, addr, "/openid/v1/jwks") // prime
 	srv.Close()                               // now unreachable
 
-	// Next call triggers a fetch that fails; stale is served but metric → 0.
-	roundTrip(t, tr, addr, "/openid/v1/jwks")
+	// A monitor refresh fails; stale is retained but metric becomes 0.
+	tr.forceRefresh(t.Context(), addr, "/openid/v1/jwks")
 	if v := testutil.ToFloat64(upstreamUp.WithLabelValues(addr, "/openid/v1/jwks")); v != 0 {
 		t.Errorf("expected gauge 0 after transport error, got %v", v)
 	}
@@ -78,7 +77,7 @@ func TestUpstreamUpGauge0OnNon200(t *testing.T) {
 	defer srv.Close()
 
 	_, upstreamUp := newRegistry()
-	tr := newCachingTransport(srv.Client().Transport, time.Minute, slog.New(slog.DiscardHandler), upstreamUp)
+	tr := newCachingTransport(srv.Client().Transport, slog.New(slog.DiscardHandler), upstreamUp)
 	addr := srv.Listener.Addr().String()
 
 	roundTrip(t, tr, addr, "/openid/v1/jwks")
@@ -96,7 +95,7 @@ func TestMonitorUpdatesGaugeWithoutClientTraffic(t *testing.T) {
 	defer srv.Close()
 
 	_, upstreamUp := newRegistry()
-	tr := newCachingTransport(srv.Client().Transport, 0, slog.New(slog.DiscardHandler), upstreamUp)
+	tr := newCachingTransport(srv.Client().Transport, slog.New(slog.DiscardHandler), upstreamUp)
 	addr := srv.Listener.Addr().String()
 
 	// Pre-initialise at 0 (mirrors newHandler behaviour).

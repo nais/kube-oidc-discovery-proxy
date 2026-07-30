@@ -7,11 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestHealthzAlways200(t *testing.T) {
-	h, err := newHandler(t.Context(), nil, time.Minute, slog.New(slog.DiscardHandler))
+	h, err := newHandler(t.Context(), nil, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}
@@ -38,7 +37,7 @@ func TestProxyRoutesByHostAndAllowsOnlyKnownPaths(t *testing.T) {
 	ctx := t.Context()
 
 	// Use http scheme for the test upstream by registering it directly.
-	h, err := newHandler(ctx, routes, time.Minute, slog.New(slog.DiscardHandler))
+	h, err := newHandler(ctx, routes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}
@@ -71,7 +70,7 @@ func TestNewHandlerRejectsDuplicateRouteHosts(t *testing.T) {
 		{Host: "dup.proxy.test", Upstream: "upstream1.example.com"},
 		{Host: "dup.proxy.test", Upstream: "upstream2.example.com"},
 	}
-	_, err := newHandler(t.Context(), routes, time.Minute, slog.New(slog.DiscardHandler))
+	_, err := newHandler(t.Context(), routes, slog.New(slog.DiscardHandler))
 	if err == nil {
 		t.Fatal("expected error for duplicate host, got nil")
 	}
@@ -93,7 +92,7 @@ func TestProxyForwardsAllowedPathToUpstream(t *testing.T) {
 
 	ctx := t.Context()
 
-	h, err := newHandler(ctx, routes, time.Minute, slog.New(slog.DiscardHandler))
+	h, err := newHandler(ctx, routes, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatalf("newHandler: %v", err)
 	}

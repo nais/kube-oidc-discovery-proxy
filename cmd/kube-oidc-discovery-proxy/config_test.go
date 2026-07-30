@@ -2,7 +2,6 @@ package main
 
 import (
 	"testing"
-	"time"
 )
 
 func TestParseFlagsDefaults(t *testing.T) {
@@ -10,7 +9,7 @@ func TestParseFlagsDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse flags: %v", err)
 	}
-	if cfg.BindAddress != ":8080" || cfg.LogLevel != "info" || cfg.CacheTTL != time.Minute || len(cfg.Routes) != 0 {
+	if cfg.BindAddress != ":8080" || cfg.LogLevel != "info" || len(cfg.Routes) != 0 {
 		t.Fatalf("unexpected defaults: %#v", cfg)
 	}
 }
@@ -19,7 +18,6 @@ func TestParseFlags(t *testing.T) {
 	cfg, err := parseFlags([]string{
 		"--bind-address", ":9090",
 		"--log-level", "debug",
-		"--cache-ttl", "5m",
 		"--target", "one.proxy.test=one.example.com",
 		"--target", "two.proxy.test=two.example.com",
 	})
@@ -27,7 +25,7 @@ func TestParseFlags(t *testing.T) {
 		t.Fatalf("parse flags: %v", err)
 	}
 
-	if cfg.BindAddress != ":9090" || cfg.LogLevel != "debug" || cfg.CacheTTL != 5*time.Minute {
+	if cfg.BindAddress != ":9090" || cfg.LogLevel != "debug" {
 		t.Fatalf("unexpected config: %#v", cfg)
 	}
 	wantRoutes := []route{

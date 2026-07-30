@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"strings"
-	"time"
 )
 
 // route maps an inbound request host to the upstream apiserver host it should
@@ -18,7 +17,6 @@ type route struct {
 type Config struct {
 	BindAddress string
 	LogLevel    string
-	CacheTTL    time.Duration
 	Routes      []route
 }
 
@@ -26,7 +24,6 @@ func DefaultConfig() Config {
 	return Config{
 		BindAddress: ":8080",
 		LogLevel:    "info",
-		CacheTTL:    time.Minute,
 	}
 }
 
@@ -35,7 +32,6 @@ func parseFlags(args []string) (Config, error) {
 	flags := flag.NewFlagSet("kube-oidc-discovery-proxy", flag.ContinueOnError)
 	flags.StringVar(&cfg.BindAddress, "bind-address", cfg.BindAddress, "address to listen on")
 	flags.StringVar(&cfg.LogLevel, "log-level", cfg.LogLevel, "which log level to output")
-	flags.DurationVar(&cfg.CacheTTL, "cache-ttl", cfg.CacheTTL, "how long to cache upstream discovery responses")
 	flags.Var(targets{routes: &cfg.Routes}, "target", "host=upstream route, repeatable")
 	if err := flags.Parse(args); err != nil {
 		return Config{}, err
