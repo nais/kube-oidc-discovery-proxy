@@ -19,10 +19,10 @@ spec:
             consequence: "The proxy is serving stale data when available, but new OIDC discovery data cannot be fetched."
             action: "Check connectivity from kube-oidc-discovery-proxy to {{ `{{ $labels.upstream }}` }} and inspect its logs."
             message: "Fetches from {{ `{{ $labels.upstream }}{{ $labels.path }}` }} have failed for at least 10 minutes."
+            dashboard_url: "https://monitoring.nais.io/d/actcss7/kube-oidc-discovery-proxy?var-tenant={{ .Values.fasit.tenant.name }}"
           labels:
             severity: warning
             namespace: {{ .Release.Namespace }}
-            dashboard_url: "https://monitoring.nais.io/d/actcss7/kube-oidc-discovery-proxy?var-tenant={{ .Values.fasit.tenant.name }}"
         - alert: KubeOidcDiscoveryProxyMetricsMissing
           expr: absent(kube_oidc_discovery_proxy_upstream_up{namespace={{ .Release.Namespace | quote }}})
           for: 10m
@@ -30,8 +30,8 @@ spec:
             summary: "Kubernetes OIDC discovery proxy metrics are missing"
             consequence: "Upstream availability is not being monitored."
             action: "Check the kube-oidc-discovery-proxy pods, PodMonitor, NetworkPolicy, and Prometheus targets."
+            dashboard_url: "https://monitoring.nais.io/d/actcss7/kube-oidc-discovery-proxy?var-tenant={{ .Values.fasit.tenant.name }}"
           labels:
             severity: warning
             namespace: {{ .Release.Namespace }}
-            dashboard_url: "https://monitoring.nais.io/d/actcss7/kube-oidc-discovery-proxy?var-tenant={{ .Values.fasit.tenant.name }}"
 {{- end }}
