@@ -4,7 +4,7 @@ go 1.27.1
 
 require (
 	github.com/prometheus/client_golang v1.24.1
-	golang.org/x/sync v0.23.0
+	golang.org/x/sync v0.24.0
 )
 
 require (
